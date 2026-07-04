@@ -1,17 +1,17 @@
 {
   "users": {
     "6977764677": {
-      "account": "1727966412",
-      "password": "1720409166",
-      "token": "3d84c8ec-60fc-4df3-befa-ad700668fc4c",
-      "login_time": 1783193598096,
+      "account": "",
+      "password": "",
+      "token": "",
+      "login_time": ,
       "buy_count": 0,
       "cycle_level": 0,
       "cycle_active": false,
       "cycle_start": 0,
       "last_buy_time": 0,
       "history": [],
-      "display_name": "Dolybarman"
+      "display_name": ""
     }
   }
 }
