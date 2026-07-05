@@ -1,7 +1,7 @@
 const https = require("https");
-const config = require("../config.json");
 
-const API = `https://api.telegram.org/bot${config.BOT_TOKEN}`;
+const TOKEN = process.env.BOT_TOKEN || (() => { try { return require("../config.json").BOT_TOKEN; } catch { return null; } })();
+const API = `https://api.telegram.org/bot${TOKEN}`;
 
 function send(chatId, text, opts = {}) {
   return new Promise((resolve, reject) => {

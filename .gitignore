@@ -1,0 +1,5 @@
+config.json
+data.json
+offset.txt
+node_modules/
+.env

@@ -1,12 +1,12 @@
 const https = require("https");
-const config = require("./config.json");
+const TOKEN = process.env.BOT_TOKEN || (() => { try { return require("./config.json").BOT_TOKEN; } catch { return null; } })();
 const db = require("./src/db");
 const api = require("./src/api");
 const tg = require("./src/telegram");
 const handlers = require("./src/handlers");
 const poll = require("./src/poll");
 
-const API = `https://api.telegram.org/bot${config.BOT_TOKEN}`;
+const API = `https://api.telegram.org/bot${TOKEN}`;
 const OFFSET_FILE = "./offset.txt";
 
 process.on("uncaughtException", (e) => console.error("UNCAUGHT:", e));
