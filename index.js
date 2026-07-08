@@ -168,6 +168,10 @@ function handleUpdate(upd) {
       handlers.showPoll(chatId);
       break;
 
+    case "🔒 Close Poll":
+      handlers.closePoll(chatId);
+      break;
+
     case "🚪 Logout":
       handlers.doLogout(chatId);
       break;
