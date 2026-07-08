@@ -28,7 +28,8 @@ function mainKb() {
   return tg.keyboard([
     ["🆕 New Order", "📊 Status"],
     ["📅 Daily", "📋 History"],
-    ["🎲 Poll", "🚪 Logout"],
+    ["🎲 Poll", "🔒 Close Poll"],
+    ["🚪 Logout"],
   ]);
 }
 
@@ -365,9 +366,31 @@ async function showPoll(chatId) {
     await tg.send(chatId, "❌ Poll feature bondho ache.", { reply_markup: mainKb() });
     return;
   }
-  await tg.sendPoll(chatId, "Ludo", ["4", "5", "6", "7", "8", "9", "10", "11", "12"], {
+  const respText = await tg.sendPoll(chatId, "Ludo", ["4", "5", "6", "7", "8", "9", "10", "11", "12"], {
     is_anonymous: false,
   });
+  try {
+    const resp = JSON.parse(respText);
+    if (resp.ok && resp.result) {
+      const s = db.get(chatId);
+      if (s) {
+        s.lastPollMessageId = resp.result.message_id;
+        db.set(chatId, s);
+      }
+    }
+  } catch {}
+}
+
+async function closePoll(chatId) {
+  const s = db.get(chatId);
+  if (!s || !s.lastPollMessageId) {
+    await tg.send(chatId, "❌ Kono active poll paoa jayni.", { reply_markup: mainKb() });
+    return;
+  }
+  await tg.stopPoll(chatId, s.lastPollMessageId);
+  s.lastPollMessageId = null;
+  db.set(chatId, s);
+  await tg.send(chatId, "🔒 Poll bondho kora hoyeche. Ekhon r keu vote dite parbe na.", { reply_markup: mainKb() });
 }
 
 module.exports = {
@@ -387,6 +410,7 @@ module.exports = {
   doLogout,
   forceLogout,
   showPoll,
+  closePoll,
   mainKb,
   LEVELS,
   SLOT_MS,
