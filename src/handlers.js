@@ -28,7 +28,7 @@ function mainKb() {
   return tg.keyboard([
     ["🆕 New Order", "📊 Status"],
     ["📅 Daily", "📋 History"],
-    ["🚪 Logout"],
+    ["🎲 Poll", "🚪 Logout"],
   ]);
 }
 
@@ -355,6 +355,21 @@ async function forceLogout(chatId) {
   await tg.send(chatId, "✅ Logged out.\n\nEnter account and password:\n`account password`", { reply_markup: tg.removeKeyboard() });
 }
 
+function isPollEnabled() {
+  try { return require("../config.json").pollEnabled !== false; }
+  catch { return true; }
+}
+
+async function showPoll(chatId) {
+  if (!isPollEnabled()) {
+    await tg.send(chatId, "❌ Poll feature bondho ache.", { reply_markup: mainKb() });
+    return;
+  }
+  await tg.sendPoll(chatId, "Ludo", ["4", "5", "6", "7", "8", "9", "10", "11", "12"], {
+    is_anonymous: false,
+  });
+}
+
 module.exports = {
   showMenu,
   showLevelPicker,
@@ -371,6 +386,7 @@ module.exports = {
   showDepositHistory,
   doLogout,
   forceLogout,
+  showPoll,
   mainKb,
   LEVELS,
   SLOT_MS,
