@@ -415,7 +415,9 @@ function isPollEnabled() {
   catch { return true; }
 }
 
-async function showPoll(chatId) {
+// userId = Telegram user id of whoever pressed "🎲 Poll" — saved so we know
+// who is allowed to close it later.
+async function showPoll(chatId, userId) {
   if (!isPollEnabled()) {
     await tg.send(chatId, "❌ Poll feature bondho ache.", { reply_markup: topKb() });
     return;
@@ -426,23 +428,31 @@ async function showPoll(chatId) {
   try {
     const resp = JSON.parse(respText);
     if (resp.ok && resp.result) {
-      // Track the poll message id per chat, independent of login state,
-      // so it survives even if the user isn't logged in.
+      // Track the poll message id AND who started it, per chat, independent
+      // of login state, so it survives even if the user isn't logged in.
       const s = db.get(chatId) || {};
       s.lastPollMessageId = resp.result.message_id;
+      s.lastPollStarterId = userId;
       db.set(chatId, s, { skipIfNoSession: true });
     }
   } catch {}
 }
 
-async function closePoll(chatId) {
+// userId = Telegram user id of whoever pressed "🔒 Close Poll" — only allowed
+// through if it matches the user who started the poll.
+async function closePoll(chatId, userId) {
   const s = db.get(chatId);
   if (!s || !s.lastPollMessageId) {
     await tg.send(chatId, "❌ Kono active poll paoa jayni.", { reply_markup: topKb() });
     return;
   }
+  if (s.lastPollStarterId && String(s.lastPollStarterId) !== String(userId)) {
+    await tg.send(chatId, "⚠️ Shudhu jei poll shuru korche, shei ei poll close korte parbe.", { reply_markup: topKb() });
+    return;
+  }
   await tg.stopPoll(chatId, s.lastPollMessageId);
   s.lastPollMessageId = null;
+  s.lastPollStarterId = null;
   db.set(chatId, s);
   await tg.send(chatId, "🔒 Poll bondho kora hoyeche. Ekhon r keu vote dite parbe na.", { reply_markup: topKb() });
 }
