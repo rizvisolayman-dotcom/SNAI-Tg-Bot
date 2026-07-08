@@ -24,9 +24,6 @@ function send(chatId, text, opts = {}) {
   });
 }
 
-function keyboard(rows) {
-  return { keyboard: rows.map(r => r.map(c => ({ text: c }))), resize_keyboard: true };
-}
 function sendPoll(chatId, question, options, opts = {}) {
   return new Promise((resolve, reject) => {
     const payload = {
@@ -54,6 +51,32 @@ function sendPoll(chatId, question, options, opts = {}) {
     req.end();
   });
 }
+
+function stopPoll(chatId, messageId) {
+  return new Promise((resolve, reject) => {
+    const payload = { chat_id: chatId, message_id: messageId };
+    const b = JSON.stringify(payload);
+    const u = new URL(`${API}/stopPoll`);
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => resolve(d));
+    });
+    req.on("error", reject);
+    req.write(b);
+    req.end();
+  });
+}
+
+function keyboard(rows) {
+  return { keyboard: rows.map(r => r.map(c => ({ text: c }))), resize_keyboard: true };
+}
+
 const removeKeyboard = () => ({ remove_keyboard: true });
 
-module.exports = { send, sendPoll, keyboard, removeKeyboard };
+module.exports = { send, sendPoll, stopPoll, keyboard, removeKeyboard };
