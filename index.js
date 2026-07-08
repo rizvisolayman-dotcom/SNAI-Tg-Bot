@@ -69,6 +69,7 @@ function handleUpdate(upd) {
   if (!upd.message || !upd.message.text) return;
   const chatId = String(upd.message.chat.id);
   const text = upd.message.text.trim();
+  const userId = upd.message.from && upd.message.from.id;
   const s = db.get(chatId);
 
   console.log(`[${chatId}] ${text}`);
@@ -123,10 +124,10 @@ function handleUpdate(upd) {
       handlers.showLogin(chatId);
       break;
     case "🎲 Poll":
-      handlers.showPoll(chatId);
+      handlers.showPoll(chatId, userId);
       break;
     case "🔒 Close Poll":
-      handlers.closePoll(chatId);
+      handlers.closePoll(chatId, userId);
       break;
     case "🆕 New Order":
       handlers.showLevelPicker(chatId);
