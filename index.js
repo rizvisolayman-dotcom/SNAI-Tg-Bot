@@ -164,6 +164,10 @@ function handleUpdate(upd) {
       handlers.showDepositHistory(chatId);
       break;
 
+    case "🎲 Poll":
+      handlers.showPoll(chatId);
+      break;
+
     case "🚪 Logout":
       handlers.doLogout(chatId);
       break;
