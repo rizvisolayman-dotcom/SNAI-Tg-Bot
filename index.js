@@ -23,6 +23,16 @@ function saveOffset(n) {
 const awaitingLevelConfirm = {};
 const awaitingLogout = {};
 
+// Button labels that are handled explicitly in the switch below. Anything
+// else, when the user isn't logged in, is treated as an "account password" login attempt.
+const KNOWN_BUTTONS = new Set([
+  "🔑 Login", "🎲 Poll", "🔒 Close Poll",
+  "🆕 New Order", "📊 Status", "📅 Daily", "📋 History",
+  "Level 1 — Lil Pudgy #21432", "Level 2 — Pudgy Penguin #5837", "Level 3 — Azuki #5589",
+  "🎁 Claim Now", "📦 NFT Orders", "📅 Daily Log", "💰 Withdrawals", "💳 Deposits",
+  "🚪 Logout", "✅ Yes, logout", "🏠 Main Menu", "« Back", "❌ Cancel",
+]);
+
 function fetchUpdates(offset, cb) {
   const u = new URL(`${API}/getUpdates`);
   u.searchParams.set("offset", offset);
@@ -45,6 +55,17 @@ function fetchUpdates(offset, cb) {
   }).on("error", () => { cb && cb(); });
 }
 
+function attemptLogin(chatId, account, password) {
+  tg.send(chatId, "🔄 Logging in...");
+  api.login(chatId, account, password).then(resp => {
+    if (resp.code === 1) {
+      tg.send(chatId, `✅ *Logged in as ${resp.data.userinfo.username || account}!*`, { reply_markup: handlers.accountKb() });
+    } else {
+      tg.send(chatId, `❌ Login failed: ${resp.msg || "error"}`, { reply_markup: handlers.topKb() });
+    }
+  });
+}
+
 function handleUpdate(upd) {
   if (!upd.message || !upd.message.text) return;
   const chatId = String(upd.message.chat.id);
@@ -64,35 +85,9 @@ function handleUpdate(upd) {
     if (parts.length >= 2) {
       const account = parts[0];
       const password = parts.slice(1).join(" ");
-      tg.send(chatId, "🔄 Logging in...");
-      api.login(chatId, account, password).then(resp => {
-        if (resp.code === 1) {
-          tg.send(chatId, `✅ *Logged in as ${resp.data.userinfo.username || account}!*`, { reply_markup: handlers.mainKb() });
-        } else {
-          tg.send(chatId, `❌ Login failed: ${resp.msg || "error"}`);
-        }
-      });
+      attemptLogin(chatId, account, password);
     } else {
       tg.send(chatId, "Format: `/login account password`");
-    }
-    return;
-  }
-
-  if (!s) {
-    const parts = text.split(/\s+/);
-    if (parts.length >= 2) {
-      tg.send(chatId, "🔄 Logging in...");
-      const account = parts[0];
-      const password = parts.slice(1).join(" ");
-      api.login(chatId, account, password).then(resp => {
-        if (resp.code === 1) {
-          tg.send(chatId, `✅ *Logged in as ${resp.data.userinfo.username || account}!*`, { reply_markup: handlers.mainKb() });
-        } else {
-          tg.send(chatId, `❌ Login failed: ${resp.msg || "error"}`);
-        }
-      });
-    } else {
-      tg.send(chatId, "*Smart-NFT Bot* 🚀\n\nEnter account and password:\n`account password`", { reply_markup: tg.removeKeyboard() });
     }
     return;
   }
@@ -103,7 +98,7 @@ function handleUpdate(upd) {
     if (text === "✅ Confirm") {
       handlers.startCycle(chatId, level);
     } else {
-      handlers.showMenu(chatId);
+      handlers.goBack(chatId);
     }
     return;
   }
@@ -113,12 +108,34 @@ function handleUpdate(upd) {
     if (text === "✅ Yes, logout") {
       handlers.forceLogout(chatId);
     } else {
-      handlers.showMenu(chatId);
+      handlers.goBack(chatId);
     }
     return;
   }
 
+  // Not logged in and the text isn't a known button -> treat as
+  // an "account password" login attempt (implicit login, no /login needed).
+  if (!s && !KNOWN_BUTTONS.has(text)) {
+    const parts = text.split(/\s+/);
+    if (parts.length >= 2) {
+      attemptLogin(chatId, parts[0], parts.slice(1).join(" "));
+      return;
+    }
+  }
+
   switch (text) {
+    case "🔑 Login":
+      handlers.showLogin(chatId);
+      break;
+
+    case "🎲 Poll":
+      handlers.showPoll(chatId);
+      break;
+
+    case "🔒 Close Poll":
+      handlers.closePoll(chatId);
+      break;
+
     case "🆕 New Order":
       handlers.showLevelPicker(chatId);
       break;
@@ -164,14 +181,6 @@ function handleUpdate(upd) {
       handlers.showDepositHistory(chatId);
       break;
 
-    case "🎲 Poll":
-      handlers.showPoll(chatId);
-      break;
-
-    case "🔒 Close Poll":
-      handlers.closePoll(chatId);
-      break;
-
     case "🚪 Logout":
       handlers.doLogout(chatId);
       break;
@@ -180,9 +189,13 @@ function handleUpdate(upd) {
       awaitingLogout[chatId] = true;
       break;
 
+    case "🏠 Main Menu":
+      handlers.showMenu(chatId);
+      break;
+
     case "« Back":
     case "❌ Cancel":
-      handlers.showMenu(chatId);
+      handlers.goBack(chatId);
       break;
 
     default:
@@ -211,3 +224,4 @@ poll.start();
 require("./src/dashboard").start(process.env.DASH_PORT || 3000);
 
 console.log("Bot started (polling mode)");
+    
