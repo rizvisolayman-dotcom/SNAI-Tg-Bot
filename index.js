@@ -16,6 +16,7 @@ function getOffset() {
   try { return parseInt(require("fs").readFileSync(OFFSET_FILE, "utf8")) || 0; }
   catch { return 0; }
 }
+
 function saveOffset(n) {
   require("fs").writeFileSync(OFFSET_FILE, String(n));
 }
@@ -23,8 +24,7 @@ function saveOffset(n) {
 const awaitingLevelConfirm = {};
 const awaitingLogout = {};
 
-// Button labels that are handled explicitly in the switch below. Anything
-// else, when the user isn't logged in, is treated as an "account password" login attempt.
+// Button labels that are handled explicitly in the switch below.
 const KNOWN_BUTTONS = new Set([
   "🔑 Login", "🎲 Poll", "🔒 Close Poll",
   "🆕 New Order", "📊 Status", "📅 Daily", "📋 History",
@@ -38,7 +38,6 @@ function fetchUpdates(offset, cb) {
   u.searchParams.set("offset", offset);
   u.searchParams.set("timeout", 30);
   u.searchParams.set("allowed_updates", JSON.stringify(["message"]));
-
   https.get(u.toString(), (res) => {
     let d = "";
     res.on("data", c => d += c);
@@ -74,7 +73,8 @@ function handleUpdate(upd) {
 
   console.log(`[${chatId}] ${text}`);
 
-  if (text.startsWith("/menu") || text.startsWith("/start")) {
+  // Only /startbot triggers a reply now
+  if (text.startsWith("/startbot")) {
     handlers.showMenu(chatId);
     return;
   }
@@ -113,33 +113,24 @@ function handleUpdate(upd) {
     return;
   }
 
-  // Not logged in and the text isn't a known button -> treat as
-  // an "account password" login attempt (implicit login, no /login needed).
-  if (!s && !KNOWN_BUTTONS.has(text)) {
-    const parts = text.split(/\s+/);
-    if (parts.length >= 2) {
-      attemptLogin(chatId, parts[0], parts.slice(1).join(" "));
-      return;
-    }
+  // If it's not a known button, do nothing (no implicit login, no auto-reply)
+  if (!KNOWN_BUTTONS.has(text)) {
+    return;
   }
 
   switch (text) {
     case "🔑 Login":
       handlers.showLogin(chatId);
       break;
-
     case "🎲 Poll":
       handlers.showPoll(chatId);
       break;
-
     case "🔒 Close Poll":
       handlers.closePoll(chatId);
       break;
-
     case "🆕 New Order":
       handlers.showLevelPicker(chatId);
       break;
-
     case "Level 1 — Lil Pudgy #21432":
     case "Level 2 — Pudgy Penguin #5837":
     case "Level 3 — Azuki #5589": {
@@ -148,58 +139,44 @@ function handleUpdate(upd) {
       handlers.confirmLevel(chatId, lvNum);
       break;
     }
-
     case "📊 Status":
       handlers.showStatus(chatId);
       break;
-
     case "📅 Daily":
       handlers.showDaily(chatId);
       break;
-
     case "🎁 Claim Now":
       handlers.doDailyClaim(chatId);
       break;
-
     case "📋 History":
       handlers.showHistoryMenu(chatId);
       break;
-
     case "📦 NFT Orders":
       handlers.showNftHistory(chatId);
       break;
-
     case "📅 Daily Log":
       handlers.showDailyLog(chatId);
       break;
-
     case "💰 Withdrawals":
       handlers.showWithdrawHistory(chatId);
       break;
-
     case "💳 Deposits":
       handlers.showDepositHistory(chatId);
       break;
-
     case "🚪 Logout":
       handlers.doLogout(chatId);
       break;
-
     case "✅ Yes, logout":
       awaitingLogout[chatId] = true;
       break;
-
     case "🏠 Main Menu":
       handlers.showMenu(chatId);
       break;
-
     case "« Back":
     case "❌ Cancel":
       handlers.goBack(chatId);
       break;
-
     default:
-      handlers.showMenu(chatId);
       break;
   }
 }
@@ -220,8 +197,5 @@ setInterval(() => {
 }, 1000);
 
 poll.start();
-
 require("./src/dashboard").start(process.env.DASH_PORT || 3000);
-
 console.log("Bot started (polling mode)");
-    
