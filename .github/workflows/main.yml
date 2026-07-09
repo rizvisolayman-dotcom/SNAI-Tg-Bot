@@ -19,6 +19,16 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
+      - name: Restore bot data
+        uses: actions/cache@v4
+        with:
+          path: |
+            data.json
+            offset.txt
+          key: bot-data-${{ github.run_id }}
+          restore-keys: |
+            bot-data-
+
       - name: Run Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
