@@ -1,5 +1,6 @@
 const db = require("./db");
 const handlers = require("./handlers");
+const tg = require("./telegram");
 
 const CHECK_MS = 60 * 1000;
 
@@ -21,6 +22,7 @@ function start() {
   setInterval(async () => {
     try {
       const now = new Date();
+
       const dhaka = new Date(
         now.toLocaleString("en-US", {
           timeZone: "Asia/Dhaka"
@@ -42,6 +44,11 @@ function start() {
       for (const [chatId] of db.getAll()) {
         try {
           await handlers.doDailyClaim(chatId);
+
+          await tg.send(
+            chatId,
+            "🤖 Auto Daily Claim Complete!\n✅ Daily check-in automatically done."
+          );
         } catch (e) {
           console.error("Daily claim error:", chatId, e);
         }
