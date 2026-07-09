@@ -8,8 +8,9 @@ const LEVELS = {
   3: { id: 160, name: "Azuki #5589" },
 };
 
-const SLOT_MS = 7 * 60 * 1000;
+const SLOT_MS = 6.5 * 60 * 1000;
 const MAX_BUYS = 5;
+const AUTO_ORDER_GRACE_MS = 5 * 60 * 1000; // wait 5 min after the watched order ends
 
 function fmt(v) { return parseFloat(v || 0).toFixed(2); }
 
@@ -24,7 +25,18 @@ function fmtDate(ts) {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-// Top-level menu: shown on /startbot, and after "Main Menu" / logout.
+// Parses "YYYY-MM-DD HH:mm:ss" text (already in Bangladesh/Dhaka local time,
+// fixed UTC+6) into a real UTC epoch ms value.
+function parseDhakaTimestamp(text) {
+  if (!text) return null;
+  const m = String(text).trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  const h = Number(m[4]), mi = Number(m[5]), se = Number(m[6]);
+  const asUtcMs = Date.UTC(y, mo - 1, d, h, mi, se);
+  return asUtcMs - 6 * 60 * 60 * 1000;
+}
+
 function topKb() {
   return tg.keyboard([
     ["🔑 Login", "🎲 Poll"],
@@ -32,23 +44,20 @@ function topKb() {
   ]);
 }
 
-// Account submenu: shown only after the user is logged in.
 function accountKb() {
   return tg.keyboard([
     ["🆕 New Order", "📊 Status"],
     ["📅 Daily", "📋 History"],
+    ["🔁 Auto Order"],
     ["🚪 Logout"],
     ["🏠 Main Menu"],
   ]);
 }
 
-// Backwards-compatible alias (older code / callers may still reference mainKb).
 function mainKb() {
   return topKb();
 }
 
-// Checks if the user is logged in. If not, sends a login prompt and
-// returns false so the calling handler can stop early.
 async function requireLogin(chatId) {
   const s = db.get(chatId);
   if (!s) {
@@ -58,7 +67,6 @@ async function requireLogin(chatId) {
   return true;
 }
 
-// Sends the user back to whichever menu fits their login state.
 async function goBack(chatId) {
   const s = db.get(chatId);
   if (s) {
@@ -76,7 +84,6 @@ async function showMenu(chatId) {
   await tg.send(chatId, text, { reply_markup: topKb() });
 }
 
-// Handles the "🔑 Login" button on the top menu.
 async function showLogin(chatId) {
   const s = db.get(chatId);
   if (s) {
@@ -108,7 +115,7 @@ async function confirmLevel(chatId, level) {
   if (!lv) return;
   await tg.send(chatId,
     `*Confirm Level ${level}: ${lv.name}*\n` +
-    `Buy \`${MAX_BUYS}\` slots × \`7 min\` each\n` +
+    `Buy \`${MAX_BUYS}\` slots × \`6.5 min\` each\n` +
     `Proceed?`, {
     reply_markup: tg.keyboard([["✅ Confirm"], ["❌ Cancel"]]),
   });
@@ -172,11 +179,14 @@ async function doBuy(chatId) {
       `Level ${s.cycle_level}: ${lv.name}\n` +
       `All \`${MAX_BUYS}\` buys done\n` +
       `Balance: \`${fmt(bal)} TRX\``, { reply_markup: accountKb() });
+    if (s.autoOrderEnabled) {
+      await refreshAutoWatch(chatId, s.cycle_level);
+    }
   } else {
     await tg.send(chatId,
       `✅ *Buy #${s.buy_count} done!* ✅\n` +
       `Balance: \`${fmt(bal)} TRX\`\n` +
-      `⏳ Next in \`7 min\`\n` +
+      `⏳ Next in \`6.5 min\`\n` +
       `Progress: ${s.buy_count}/${MAX_BUYS}`, { reply_markup: accountKb() });
   }
 }
@@ -210,6 +220,15 @@ async function showStatus(chatId) {
     cycleText = `\n*Cycle:* ${s.buy_count}/${MAX_BUYS} | ⏳ \`${secs(remaining)}\``;
   }
 
+  let autoText = "";
+  if (s && s.autoOrderEnabled) {
+    autoText = `\n*Auto Order:* ✅ ON (Level ${s.autoOrderLevel || s.cycle_level})`;
+    if (s.autoWatchEndTs) {
+      const remain = Math.max(0, (s.autoWatchEndTs + AUTO_ORDER_GRACE_MS) - Date.now());
+      autoText += ` | Next buy in ⏳ \`${secs(remain)}\``;
+    }
+  }
+
   const l1 = await api.authed(chatId, "nft/l1status");
   let slotText = "";
   if (l1.code === 1 && l1.data) {
@@ -228,7 +247,7 @@ async function showStatus(chatId) {
     `📈 Today: \`${fmt(u.today_revenue)} TRX\`\n` +
     `📅 Daily: ${dailyStatus}\n` +
     `🟢 Active: \`${activeCount}\` | ✅ Completed: \`${completedCount}\`` +
-    slotText + cycleText, { reply_markup: accountKb() });
+    slotText + cycleText + autoText, { reply_markup: accountKb() });
 }
 
 async function showDaily(chatId) {
@@ -410,21 +429,73 @@ async function forceLogout(chatId) {
   await tg.send(chatId, "✅ Logged out.\n\nEnter account and password, or tap 🔑 Login:", { reply_markup: topKb() });
 }
 
+// Turns Auto Order on/off. When turning on, it re-uses whichever level was
+// last bought (manually or automatically) — the user must have placed at
+// least one manual order before, so the bot knows which level to keep buying.
+async function toggleAutoOrder(chatId) {
+  if (!(await requireLogin(chatId))) return;
+  const s = db.get(chatId);
+
+  if (s.autoOrderEnabled) {
+    s.autoOrderEnabled = false;
+    db.set(chatId, s);
+    await tg.send(chatId, "🔁 Auto Order *bondho* kora hoyeche.", { reply_markup: accountKb() });
+    return;
+  }
+
+  const level = s.autoOrderLevel || s.cycle_level;
+  if (!level || !LEVELS[level]) {
+    await tg.send(chatId, "⚠️ Age ekbar 🆕 New Order diye kono level-e order koren, tarpor Auto Order chalu korte parben.", { reply_markup: accountKb() });
+    return;
+  }
+
+  s.autoOrderEnabled = true;
+  s.autoOrderLevel = level;
+  db.set(chatId, s);
+  await tg.send(chatId,
+    `🔁 *Auto Order chalu holo!*\n` +
+    `Level ${level}: ${LEVELS[level].name}\n\n` +
+    `Ei level-er order shesh hole, 5 min por bot nijei notun order kinbe.`, { reply_markup: accountKb() });
+
+  await refreshAutoWatch(chatId, level);
+}
+
+// Looks up the soonest-ending active order at the given level and stores
+// its end time, so the background auto-order job knows when to re-buy.
+async function refreshAutoWatch(chatId, level) {
+  const s = db.get(chatId);
+  if (!s) return;
+  const lv = LEVELS[level];
+  if (!lv) return;
+
+  const resp = await api.authed(chatId, "nft/getMyNftList", { level_id: 1, page: 1, limit: 50 });
+  if (resp.code !== 1 || !resp.data || !resp.data.list) return;
+
+  const active = resp.data.list.filter(o => o.status == 0 && o.name === lv.name);
+  if (!active.length) {
+    s.autoWatchEndTs = null;
+    db.set(chatId, s);
+    return;
+  }
+
+  let soonest = null;
+  for (const o of active) {
+    const ts = parseDhakaTimestamp(o.staking_end_time_text);
+    if (ts && (soonest === null || ts < soonest)) soonest = ts;
+  }
+  s.autoWatchEndTs = soonest;
+  s.autoOrderLevel = level;
+  db.set(chatId, s);
+}
+
 function isPollEnabled() {
   try { return require("../config.json").pollEnabled !== false; }
   catch { return true; }
 }
 
-// Fixed option list used for every Ludo poll. Index in this array matches
-// Telegram's option_ids used in poll_answer updates.
 const POLL_OPTIONS = ["4", "5", "6", "7", "8", "9", "10", "11", "12"];
-
-// poll_id -> { optionIndex: [{ id, name }] }
-// Tracks who voted for which option, per poll, so we can announce a winner later.
 const pollVotes = {};
 
-// userId = Telegram user id of whoever pressed "🎲 Poll" — saved so we know
-// who is allowed to close it / pick a winner later.
 async function showPoll(chatId, userId) {
   if (!isPollEnabled()) {
     await tg.send(chatId, "❌ Poll feature bondho ache.", { reply_markup: topKb() });
@@ -436,9 +507,6 @@ async function showPoll(chatId, userId) {
   try {
     const resp = JSON.parse(respText);
     if (resp.ok && resp.result) {
-      // Track poll message id, poll id (for votes) and who started it, per
-      // chat, independent of login state, so it survives even if the user
-      // isn't logged in.
       const s = db.get(chatId) || {};
       s.lastPollMessageId = resp.result.message_id;
       s.lastPollStarterId = userId;
@@ -451,9 +519,6 @@ async function showPoll(chatId, userId) {
   } catch {}
 }
 
-// userId = Telegram user id of whoever pressed "🔒 Close Poll" — only allowed
-// through if it matches the user who started the poll. Only closes the poll
-// (locks voting) — does NOT roll dice or pick a winner.
 async function closePoll(chatId, userId) {
   const s = db.get(chatId);
   if (!s || !s.lastPollMessageId) {
@@ -465,12 +530,11 @@ async function closePoll(chatId, userId) {
     return;
   }
   await tg.stopPoll(chatId, s.lastPollMessageId);
-  s.lastPollMessageId = null; // prevents closing the same poll twice
+  s.lastPollMessageId = null;
   db.set(chatId, s);
   await tg.send(chatId, "🔒 Poll bondho kora hoyeche. Ekhon r keu vote dite parbe na.", { reply_markup: topKb() });
 }
 
-// Rolls one Telegram dice (🎲) and resolves with its value (1-6).
 async function rollDice(chatId) {
   const respText = await tg.sendDice(chatId);
   try {
@@ -482,9 +546,6 @@ async function rollDice(chatId) {
   return 1;
 }
 
-// userId = Telegram user id of whoever pressed "🎯 Pick Winner" — only the
-// person who started the poll can do this. Can be called repeatedly
-// (re-dice) to reroll and reselect a winner.
 async function pickWinner(chatId, userId) {
   const s = db.get(chatId);
   if (!s || !s.lastPollId) {
@@ -496,7 +557,6 @@ async function pickWinner(chatId, userId) {
     return;
   }
 
-  // Roll 2 dice, reroll if the sum lands below the lowest poll option (4).
   let sum = 0;
   let attempts = 0;
   do {
@@ -509,14 +569,11 @@ async function pickWinner(chatId, userId) {
   await announcePollWinner(chatId, s.lastPollId, String(sum));
 }
 
-// Called for every incoming poll_answer update from Telegram. Records or
-// updates which option a user voted for (handles vote changes/retractions).
 function recordPollAnswer(pollAnswer) {
   const { poll_id, user, option_ids } = pollAnswer;
   if (!poll_id || !user) return;
   if (!pollVotes[poll_id]) pollVotes[poll_id] = {};
 
-  // Remove this user from any option they may have picked before.
   for (const idx of Object.keys(pollVotes[poll_id])) {
     pollVotes[poll_id][idx] = pollVotes[poll_id][idx].filter(v => v.id !== user.id);
   }
@@ -529,7 +586,6 @@ function recordPollAnswer(pollAnswer) {
   }
 }
 
-// Mentions everyone who voted for the given option (e.g. "6").
 async function announcePollWinner(chatId, pollId, optionText) {
   const idx = POLL_OPTIONS.indexOf(String(optionText).trim());
   if (idx === -1) return;
@@ -562,6 +618,8 @@ module.exports = {
   showDepositHistory,
   doLogout,
   forceLogout,
+  toggleAutoOrder,
+  refreshAutoWatch,
   showPoll,
   closePoll,
   pickWinner,
