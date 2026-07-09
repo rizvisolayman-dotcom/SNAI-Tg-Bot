@@ -4,8 +4,11 @@ const path = require("path");
 const DATA_FILE = path.join(__dirname, "..", "data.json");
 
 function load() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
-  catch { return { users: {} }; }
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {
+    return { users: {} };
+  }
 }
 
 function save(d) {
@@ -29,7 +32,8 @@ function del(chatId) {
 }
 
 function getAll() {
-  return load().users || {};
+  const d = load();
+  return Object.entries(d.users || {});
 }
 
 module.exports = {
