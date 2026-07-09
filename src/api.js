@@ -1,7 +1,7 @@
 const https = require("https");
 const db = require("./db");
 
-const BASE = "https://www.alam-smartnft.org/api/";
+const BASE = "https://api.smart-nft.com/api/";
 
 function call(token, endpoint, data = {}) {
   return new Promise((resolve, reject) => {
