@@ -11,6 +11,8 @@ const OFFSET_FILE = "./offset.txt";
 
 process.on("uncaughtException", (e) => console.error("UNCAUGHT:", e));
 process.on("unhandledRejection", (e) => console.error("UNHANDLED:", e));
+process.on("SIGINT", () => { console.log("Shutting down (SIGINT)..."); process.exit(0); });
+process.on("SIGTERM", () => { console.log("Shutting down (SIGTERM)..."); process.exit(0); });
 
 function getOffset() {
   try { return parseInt(require("fs").readFileSync(OFFSET_FILE, "utf8")) || 0; }
