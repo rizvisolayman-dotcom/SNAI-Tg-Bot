@@ -24,7 +24,6 @@ function fmtDate(ts) {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-// Top-level menu: shown on /start, /menu, and after "Main Menu" / logout.
 function topKb() {
   return tg.keyboard([
     ["🔑 Login", "🎲 Poll"],
@@ -32,7 +31,6 @@ function topKb() {
   ]);
 }
 
-// Account submenu: shown only after the user is logged in.
 function accountKb() {
   return tg.keyboard([
     ["🆕 New Order", "📊 Status"],
@@ -42,13 +40,10 @@ function accountKb() {
   ]);
 }
 
-// Backwards-compatible alias (older code / callers may still reference mainKb).
 function mainKb() {
   return topKb();
 }
 
-// Checks if the user is logged in. If not, sends a login prompt and
-// returns false so the calling handler can stop early.
 async function requireLogin(chatId) {
   const s = db.get(chatId);
   if (!s) {
@@ -58,7 +53,6 @@ async function requireLogin(chatId) {
   return true;
 }
 
-// Sends the user back to whichever menu fits their login state.
 async function goBack(chatId) {
   const s = db.get(chatId);
   if (s) {
@@ -76,7 +70,6 @@ async function showMenu(chatId) {
   await tg.send(chatId, text, { reply_markup: topKb() });
 }
 
-// Handles the "🔑 Login" button on the top menu.
 async function showLogin(chatId) {
   const s = db.get(chatId);
   if (s) {
@@ -415,31 +408,32 @@ function isPollEnabled() {
   catch { return true; }
 }
 
-// userId = Telegram user id of whoever pressed "🎲 Poll" — saved so we know
-// who is allowed to close it later.
+const POLL_OPTIONS = ["4", "5", "6", "7", "8", "9", "10", "11", "12"];
+
+const pollVotes = {};
+
 async function showPoll(chatId, userId) {
   if (!isPollEnabled()) {
     await tg.send(chatId, "❌ Poll feature bondho ache.", { reply_markup: topKb() });
     return;
   }
-  const respText = await tg.sendPoll(chatId, "Ludo", ["4", "5", "6", "7", "8", "9", "10", "11", "12"], {
+  const respText = await tg.sendPoll(chatId, "Ludo", POLL_OPTIONS, {
     is_anonymous: false,
   });
   try {
     const resp = JSON.parse(respText);
     if (resp.ok && resp.result) {
-      // Track the poll message id AND who started it, per chat, independent
-      // of login state, so it survives even if the user isn't logged in.
       const s = db.get(chatId) || {};
       s.lastPollMessageId = resp.result.message_id;
       s.lastPollStarterId = userId;
       db.set(chatId, s, { skipIfNoSession: true });
+      if (resp.result.poll && resp.result.poll.id) {
+        pollVotes[resp.result.poll.id] = {};
+      }
     }
   } catch {}
 }
 
-// userId = Telegram user id of whoever pressed "🔒 Close Poll" — only allowed
-// through if it matches the user who started the poll.
 async function closePoll(chatId, userId) {
   const s = db.get(chatId);
   if (!s || !s.lastPollMessageId) {
@@ -455,6 +449,37 @@ async function closePoll(chatId, userId) {
   s.lastPollStarterId = null;
   db.set(chatId, s);
   await tg.send(chatId, "🔒 Poll bondho kora hoyeche. Ekhon r keu vote dite parbe na.", { reply_markup: topKb() });
+}
+
+function recordPollAnswer(pollAnswer) {
+  const { poll_id, user, option_ids } = pollAnswer;
+  if (!poll_id || !user) return;
+  if (!pollVotes[poll_id]) pollVotes[poll_id] = {};
+
+  for (const idx of Object.keys(pollVotes[poll_id])) {
+    pollVotes[poll_id][idx] = pollVotes[poll_id][idx].filter(v => v.id !== user.id);
+  }
+
+  if (option_ids && option_ids.length) {
+    const idx = option_ids[0];
+    if (!pollVotes[poll_id][idx]) pollVotes[poll_id][idx] = [];
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || "User";
+    pollVotes[poll_id][idx].push({ id: user.id, name });
+  }
+}
+
+async function announcePollWinner(chatId, pollId, optionText) {
+  const idx = POLL_OPTIONS.indexOf(String(optionText).trim());
+  if (idx === -1) return;
+
+  const voters = (pollVotes[pollId] && pollVotes[pollId][idx]) || [];
+  if (!voters.length) {
+    await tg.send(chatId, `❌ *${optionText}* e keu vote deyni.`);
+    return;
+  }
+
+  const mentions = voters.map(v => `[${v.name}](tg://user?id=${v.id})`).join(", ");
+  await tg.send(chatId, `🎉 ${mentions} — *You win today!*`);
 }
 
 module.exports = {
@@ -477,6 +502,8 @@ module.exports = {
   forceLogout,
   showPoll,
   closePoll,
+  recordPollAnswer,
+  announcePollWinner,
   topKb,
   accountKb,
   mainKb,
