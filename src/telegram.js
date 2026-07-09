@@ -73,10 +73,33 @@ function stopPoll(chatId, messageId) {
   });
 }
 
+// Sends an animated dice (default 🎲, values 1-6). The API response already
+// includes the rolled value, no need to wait for the animation client-side.
+function sendDice(chatId, emoji = "🎲") {
+  return new Promise((resolve, reject) => {
+    const payload = { chat_id: chatId, emoji };
+    const b = JSON.stringify(payload);
+    const u = new URL(`${API}/sendDice`);
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => resolve(d));
+    });
+    req.on("error", reject);
+    req.write(b);
+    req.end();
+  });
+}
+
 function keyboard(rows) {
   return { keyboard: rows.map(r => r.map(c => ({ text: c }))), resize_keyboard: true };
 }
 
 const removeKeyboard = () => ({ remove_keyboard: true });
 
-module.exports = { send, sendPoll, stopPoll, keyboard, removeKeyboard };
+module.exports = { send, sendPoll, stopPoll, sendDice, keyboard, removeKeyboard };
