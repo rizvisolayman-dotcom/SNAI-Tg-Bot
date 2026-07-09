@@ -24,23 +24,20 @@ function saveOffset(n) {
 const awaitingLevelConfirm = {};
 const awaitingLogout = {};
 
-// Button labels that are handled explicitly in the switch below.
 const KNOWN_BUTTONS = new Set([
   "🔑 Login", "🎲 Poll", "🔒 Close Poll", "🎯 Pick Winner",
-  "🆕 New Order", "📊 Status", "📅 Daily", "📋 History",
+  "🆕 New Order", "📊 Status", "📅 Daily", "📋 History", "🔁 Auto Order",
   "Level 1 — Lil Pudgy #21432", "Level 2 — Pudgy Penguin #5837", "Level 3 — Azuki #5589",
   "🎁 Claim Now", "📦 NFT Orders", "📅 Daily Log", "💰 Withdrawals", "💳 Deposits",
   "🚪 Logout", "✅ Yes, logout", "🏠 Main Menu", "« Back", "❌ Cancel",
 ]);
 
-// Recognizes a manual reply like "6" to a poll message, to announce the winner.
 const WINNER_REPLY_RE = /^(4|5|6|7|8|9|10|11|12)$/;
 
 function fetchUpdates(offset, cb) {
   const u = new URL(`${API}/getUpdates`);
   u.searchParams.set("offset", offset);
   u.searchParams.set("timeout", 30);
-  // "poll_answer" is required so we find out who voted for what.
   u.searchParams.set("allowed_updates", JSON.stringify(["message", "poll_answer"]));
   https.get(u.toString(), (res) => {
     let d = "";
@@ -70,7 +67,6 @@ function attemptLogin(chatId, account, password) {
 }
 
 function handleUpdate(upd) {
-  // Someone voted (or changed/retracted their vote) on a poll.
   if (upd.poll_answer) {
     handlers.recordPollAnswer(upd.poll_answer);
     return;
@@ -84,7 +80,6 @@ function handleUpdate(upd) {
 
   console.log(`[${chatId}] ${text}`);
 
-  // Only /startbot triggers a reply now
   if (text.startsWith("/start")) {
     handlers.showMenu(chatId);
     return;
@@ -124,15 +119,12 @@ function handleUpdate(upd) {
     return;
   }
 
-  // Manual fallback: reply to a poll message with just a number (e.g. "6")
-  // to announce and mention everyone who voted for that option.
   const replyMsg = upd.message.reply_to_message;
   if (replyMsg && replyMsg.poll && WINNER_REPLY_RE.test(text)) {
     handlers.announcePollWinner(chatId, replyMsg.poll.id, text);
     return;
   }
 
-  // If it's not a known button, do nothing (no implicit login, no auto-reply)
   if (!KNOWN_BUTTONS.has(text)) {
     return;
   }
@@ -152,6 +144,9 @@ function handleUpdate(upd) {
       break;
     case "🆕 New Order":
       handlers.showLevelPicker(chatId);
+      break;
+    case "🔁 Auto Order":
+      handlers.toggleAutoOrder(chatId);
       break;
     case "Level 1 — Lil Pudgy #21432":
     case "Level 2 — Pudgy Penguin #5837":
@@ -219,5 +214,7 @@ setInterval(() => {
 }, 1000);
 
 poll.start();
+require("./src/dailyTask").start();
+require("./src/autoOrder").start();
 require("./src/dashboard").start(process.env.DASH_PORT || 3000);
 console.log("Bot started (polling mode)");
