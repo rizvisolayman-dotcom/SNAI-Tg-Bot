@@ -24,7 +24,6 @@ function saveOffset(n) {
 const awaitingLevelConfirm = {};
 const awaitingLogout = {};
 
-// Button labels that are handled explicitly in the switch below.
 const KNOWN_BUTTONS = new Set([
   "🔑 Login", "🎲 Poll", "🔒 Close Poll",
   "🆕 New Order", "📊 Status", "📅 Daily", "📋 History",
@@ -33,11 +32,13 @@ const KNOWN_BUTTONS = new Set([
   "🚪 Logout", "✅ Yes, logout", "🏠 Main Menu", "« Back", "❌ Cancel",
 ]);
 
+const WINNER_REPLY_RE = /^(4|5|6|7|8|9|10|11|12)$/;
+
 function fetchUpdates(offset, cb) {
   const u = new URL(`${API}/getUpdates`);
   u.searchParams.set("offset", offset);
   u.searchParams.set("timeout", 30);
-  u.searchParams.set("allowed_updates", JSON.stringify(["message"]));
+  u.searchParams.set("allowed_updates", JSON.stringify(["message", "poll_answer"]));
   https.get(u.toString(), (res) => {
     let d = "";
     res.on("data", c => d += c);
@@ -66,6 +67,11 @@ function attemptLogin(chatId, account, password) {
 }
 
 function handleUpdate(upd) {
+  if (upd.poll_answer) {
+    handlers.recordPollAnswer(upd.poll_answer);
+    return;
+  }
+
   if (!upd.message || !upd.message.text) return;
   const chatId = String(upd.message.chat.id);
   const text = upd.message.text.trim();
@@ -74,7 +80,6 @@ function handleUpdate(upd) {
 
   console.log(`[${chatId}] ${text}`);
 
-  // Only /startbot triggers a reply now
   if (text.startsWith("/startbot")) {
     handlers.showMenu(chatId);
     return;
@@ -114,7 +119,12 @@ function handleUpdate(upd) {
     return;
   }
 
-  // If it's not a known button, do nothing (no implicit login, no auto-reply)
+  const replyMsg = upd.message.reply_to_message;
+  if (replyMsg && replyMsg.poll && WINNER_REPLY_RE.test(text)) {
+    handlers.announcePollWinner(chatId, replyMsg.poll.id, text);
+    return;
+  }
+
   if (!KNOWN_BUTTONS.has(text)) {
     return;
   }
