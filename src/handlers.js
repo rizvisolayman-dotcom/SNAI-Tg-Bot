@@ -24,13 +24,15 @@ function fmtDate(ts) {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// Top-level menu: shown on /startbot, and after "Main Menu" / logout.
 function topKb() {
   return tg.keyboard([
     ["🔑 Login", "🎲 Poll"],
-    ["🔒 Close Poll"],
+    ["🔒 Close Poll", "🎯 Pick Winner"],
   ]);
 }
 
+// Account submenu: shown only after the user is logged in.
 function accountKb() {
   return tg.keyboard([
     ["🆕 New Order", "📊 Status"],
@@ -40,10 +42,13 @@ function accountKb() {
   ]);
 }
 
+// Backwards-compatible alias (older code / callers may still reference mainKb).
 function mainKb() {
   return topKb();
 }
 
+// Checks if the user is logged in. If not, sends a login prompt and
+// returns false so the calling handler can stop early.
 async function requireLogin(chatId) {
   const s = db.get(chatId);
   if (!s) {
@@ -53,6 +58,7 @@ async function requireLogin(chatId) {
   return true;
 }
 
+// Sends the user back to whichever menu fits their login state.
 async function goBack(chatId) {
   const s = db.get(chatId);
   if (s) {
@@ -65,11 +71,12 @@ async function goBack(chatId) {
 async function showMenu(chatId) {
   const s = db.get(chatId);
   const text = s
-    ? `*Smart-NFT Bot* 🚀\n\nLogged in as: \`${s.display_name || s.account}\`\n\n🔑 Login → account menu\n🎲 Poll → send a poll\n🔒 Close Poll → lock the latest poll`
-    : `*Smart-NFT Bot* 🚀\n\n🔑 Login → sign in to your account\n🎲 Poll → send a poll\n🔒 Close Poll → lock the latest poll`;
+    ? `*Smart-NFT Bot* 🚀\n\nLogged in as: \`${s.display_name || s.account}\`\n\n🔑 Login → account menu\n🎲 Poll → send a poll\n🔒 Close Poll → lock the latest poll\n🎯 Pick Winner → roll dice & mention the winner`
+    : `*Smart-NFT Bot* 🚀\n\n🔑 Login → sign in to your account\n🎲 Poll → send a poll\n🔒 Close Poll → lock the latest poll\n🎯 Pick Winner → roll dice & mention the winner`;
   await tg.send(chatId, text, { reply_markup: topKb() });
 }
 
+// Handles the "🔑 Login" button on the top menu.
 async function showLogin(chatId) {
   const s = db.get(chatId);
   if (s) {
@@ -408,10 +415,16 @@ function isPollEnabled() {
   catch { return true; }
 }
 
+// Fixed option list used for every Ludo poll. Index in this array matches
+// Telegram's option_ids used in poll_answer updates.
 const POLL_OPTIONS = ["4", "5", "6", "7", "8", "9", "10", "11", "12"];
 
+// poll_id -> { optionIndex: [{ id, name }] }
+// Tracks who voted for which option, per poll, so we can announce a winner later.
 const pollVotes = {};
 
+// userId = Telegram user id of whoever pressed "🎲 Poll" — saved so we know
+// who is allowed to close it / pick a winner later.
 async function showPoll(chatId, userId) {
   if (!isPollEnabled()) {
     await tg.send(chatId, "❌ Poll feature bondho ache.", { reply_markup: topKb() });
@@ -423,17 +436,24 @@ async function showPoll(chatId, userId) {
   try {
     const resp = JSON.parse(respText);
     if (resp.ok && resp.result) {
+      // Track poll message id, poll id (for votes) and who started it, per
+      // chat, independent of login state, so it survives even if the user
+      // isn't logged in.
       const s = db.get(chatId) || {};
       s.lastPollMessageId = resp.result.message_id;
       s.lastPollStarterId = userId;
-      db.set(chatId, s, { skipIfNoSession: true });
       if (resp.result.poll && resp.result.poll.id) {
+        s.lastPollId = resp.result.poll.id;
         pollVotes[resp.result.poll.id] = {};
       }
+      db.set(chatId, s, { skipIfNoSession: true });
     }
   } catch {}
 }
 
+// userId = Telegram user id of whoever pressed "🔒 Close Poll" — only allowed
+// through if it matches the user who started the poll. Only closes the poll
+// (locks voting) — does NOT roll dice or pick a winner.
 async function closePoll(chatId, userId) {
   const s = db.get(chatId);
   if (!s || !s.lastPollMessageId) {
@@ -445,17 +465,58 @@ async function closePoll(chatId, userId) {
     return;
   }
   await tg.stopPoll(chatId, s.lastPollMessageId);
-  s.lastPollMessageId = null;
-  s.lastPollStarterId = null;
+  s.lastPollMessageId = null; // prevents closing the same poll twice
   db.set(chatId, s);
   await tg.send(chatId, "🔒 Poll bondho kora hoyeche. Ekhon r keu vote dite parbe na.", { reply_markup: topKb() });
 }
 
+// Rolls one Telegram dice (🎲) and resolves with its value (1-6).
+async function rollDice(chatId) {
+  const respText = await tg.sendDice(chatId);
+  try {
+    const resp = JSON.parse(respText);
+    if (resp.ok && resp.result && resp.result.dice) {
+      return resp.result.dice.value;
+    }
+  } catch {}
+  return 1;
+}
+
+// userId = Telegram user id of whoever pressed "🎯 Pick Winner" — only the
+// person who started the poll can do this. Can be called repeatedly
+// (re-dice) to reroll and reselect a winner.
+async function pickWinner(chatId, userId) {
+  const s = db.get(chatId);
+  if (!s || !s.lastPollId) {
+    await tg.send(chatId, "❌ Kono poll paoa jayni. Age ✔️ Poll shuru korun.", { reply_markup: topKb() });
+    return;
+  }
+  if (s.lastPollStarterId && String(s.lastPollStarterId) !== String(userId)) {
+    await tg.send(chatId, "⚠️ Shudhu jei poll shuru korche, shei winner pick korte parbe.", { reply_markup: topKb() });
+    return;
+  }
+
+  // Roll 2 dice, reroll if the sum lands below the lowest poll option (4).
+  let sum = 0;
+  let attempts = 0;
+  do {
+    const d1 = await rollDice(chatId);
+    const d2 = await rollDice(chatId);
+    sum = d1 + d2;
+    attempts++;
+  } while (sum < 4 && attempts < 20);
+
+  await announcePollWinner(chatId, s.lastPollId, String(sum));
+}
+
+// Called for every incoming poll_answer update from Telegram. Records or
+// updates which option a user voted for (handles vote changes/retractions).
 function recordPollAnswer(pollAnswer) {
   const { poll_id, user, option_ids } = pollAnswer;
   if (!poll_id || !user) return;
   if (!pollVotes[poll_id]) pollVotes[poll_id] = {};
 
+  // Remove this user from any option they may have picked before.
   for (const idx of Object.keys(pollVotes[poll_id])) {
     pollVotes[poll_id][idx] = pollVotes[poll_id][idx].filter(v => v.id !== user.id);
   }
@@ -468,18 +529,19 @@ function recordPollAnswer(pollAnswer) {
   }
 }
 
+// Mentions everyone who voted for the given option (e.g. "6").
 async function announcePollWinner(chatId, pollId, optionText) {
   const idx = POLL_OPTIONS.indexOf(String(optionText).trim());
   if (idx === -1) return;
 
   const voters = (pollVotes[pollId] && pollVotes[pollId][idx]) || [];
   if (!voters.length) {
-    await tg.send(chatId, `❌ *${optionText}* e keu vote deyni.`);
+    await tg.send(chatId, `🎲 Winning number: *${optionText}*\n❌ Kew ei number-e vote deyni.`);
     return;
   }
 
   const mentions = voters.map(v => `[${v.name}](tg://user?id=${v.id})`).join(", ");
-  await tg.send(chatId, `🎉 ${mentions} — *You win today!*`);
+  await tg.send(chatId, `🎲 Winning number: *${optionText}*\n🎉 ${mentions} — *You win today!*`);
 }
 
 module.exports = {
@@ -502,6 +564,7 @@ module.exports = {
   forceLogout,
   showPoll,
   closePoll,
+  pickWinner,
   recordPollAnswer,
   announcePollWinner,
   topKb,
