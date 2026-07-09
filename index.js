@@ -57,15 +57,33 @@ function fetchUpdates(offset, cb) {
 
 function attemptLogin(chatId, account, password) {
   tg.send(chatId, "🔄 Logging in...");
-  api.login(chatId, account, password).then(resp => {
-    if (resp.code === 1) {
-      tg.send(chatId, `✅ *Logged in as ${resp.data.userinfo.username || account}!*`, { reply_markup: handlers.accountKb() });
-    } else {
-      tg.send(chatId, `❌ Login failed: ${resp.msg || "error"}`, { reply_markup: handlers.topKb() });
-    }
-  });
-}
 
+  api.login(chatId, account, password)
+    .then(resp => {
+      if (resp && resp.code === 1) {
+        tg.send(
+          chatId,
+          `✅ *Logged in as ${resp.data.userinfo.username || account}!*`,
+          { reply_markup: handlers.accountKb() }
+        );
+      } else {
+        tg.send(
+          chatId,
+          `❌ Login failed: ${resp?.msg || "Unknown error"}`,
+          { reply_markup: handlers.topKb() }
+        );
+      }
+    })
+    .catch(err => {
+      console.error("LOGIN ERROR:", err);
+
+      tg.send(
+        chatId,
+        `❌ Login error:\n${String(err)}`,
+        { reply_markup: handlers.topKb() }
+      );
+    });
+}
 function handleUpdate(upd) {
   if (upd.poll_answer) {
     handlers.recordPollAnswer(upd.poll_answer);
