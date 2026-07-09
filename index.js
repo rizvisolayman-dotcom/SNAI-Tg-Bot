@@ -85,7 +85,7 @@ function handleUpdate(upd) {
   console.log(`[${chatId}] ${text}`);
 
   // Only /startbot triggers a reply now
-  if (text.startsWith("/startbot")) {
+  if (text.startsWith("/start")) {
     handlers.showMenu(chatId);
     return;
   }
