@@ -1,7 +1,8 @@
 const db = require("./db");
 const api = require("./api");
 const tg = require("./telegram");
-const { SLOT_MS, MAX_BUYS, mainKb } = require("./handlers");
+const handlers = require("./handlers");
+const { SLOT_MS, MAX_BUYS, mainKb } = handlers;
 
 const POLL_MS = 15_000;
 
@@ -30,6 +31,9 @@ function start() {
               s.cycle_active = false;
               db.set(chatId, s);
               await tg.send(chatId, `✅ *Cycle Complete!* 🎉`, { reply_markup: mainKb() });
+              if (s.autoOrderEnabled) {
+                await handlers.refreshAutoWatch(chatId, s.cycle_level);
+              }
             } else {
               db.set(chatId, s);
               await tg.send(chatId, `✅ *Auto Buy #${s.buy_count}/5 done!* ✅\n⏳ Next in \`6.5 min\``, { reply_markup: mainKb() });
