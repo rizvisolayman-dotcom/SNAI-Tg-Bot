@@ -32,7 +32,7 @@ function start() {
               await tg.send(chatId, `✅ *Cycle Complete!* 🎉`, { reply_markup: mainKb() });
             } else {
               db.set(chatId, s);
-              await tg.send(chatId, `✅ *Auto Buy #${s.buy_count}/5 done!* ✅\n⏳ Next in \`7 min\``, { reply_markup: mainKb() });
+              await tg.send(chatId, `✅ *Auto Buy #${s.buy_count}/5 done!* ✅\n⏳ Next in \`6.5 min\``, { reply_markup: mainKb() });
             }
           }
         } catch {}
