@@ -28,4 +28,15 @@ function del(chatId) {
   save(d);
 }
 
-module.exports = { load, save, get, set, del };
+function getAll() {
+  return load().users || {};
+}
+
+module.exports = {
+  load,
+  save,
+  get,
+  set,
+  del,
+  getAll
+};
